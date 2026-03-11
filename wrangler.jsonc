@@ -16,10 +16,7 @@
 		{
 			"binding": "DB",
 			"database_name": "tedger",
-			"database_id": "your-database-id"
-		}
+			"database_id": "c136ba42-8440-4604-995b-30156cb6f116",
+		},
 	],
-	"vars": {
-		"BOT_TOKEN": ""
-	}
 }
