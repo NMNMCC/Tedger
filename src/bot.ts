@@ -92,7 +92,7 @@ export function createBot(env: Env) {
 		}
 
 		try {
-			const entry = await run(
+			const result = await run(
 				Effect.gen(function* () {
 					const ledger = yield* LedgerService;
 					const exchange = yield* ExchangeService;
@@ -105,7 +105,7 @@ export function createBot(env: Env) {
 						currency,
 						baseCurrency,
 					);
-					return yield* ledger.add({
+					const entry = yield* ledger.add({
 						chatId: String(ctx.chat.id),
 						userId: String(ctx.from!.id),
 						userName: ctx.from!.first_name ?? "Unknown",
@@ -116,9 +116,26 @@ export function createBot(env: Env) {
 						convertedAmount,
 						baseCurrency,
 					});
-				}),
+					return { ok: true as const, entry };
+				}).pipe(
+					Effect.catchTag("RateNotFoundError", (e) =>
+						Effect.succeed({
+							ok: false as const,
+							from: e.from,
+							to: e.to,
+						}),
+					),
+				),
 			);
 
+			if (!result.ok) {
+				return ctx.reply(
+					`❌ 未找到 ${result.from}/${result.to} 汇率\n请先设置: \`/rate ${result.from}/${result.to} <汇率>\``,
+					{ parse_mode: "Markdown" },
+				);
+			}
+
+			const { entry } = result;
 			let msg = `✅ #${entry.id}`;
 			msg += ` ${fmt(entry.amount, entry.currency)}`;
 			if (entry.currency !== entry.baseCurrency) {
@@ -128,12 +145,6 @@ export function createBot(env: Env) {
 			if (entry.note) msg += ` ${entry.note}`;
 			return ctx.reply(msg);
 		} catch (e: unknown) {
-			if (e instanceof RateNotFoundError) {
-				return ctx.reply(
-					`❌ 未找到 ${e.from}/${e.to} 汇率\n请先设置: \`/rate ${e.from}/${e.to} <汇率>\``,
-					{ parse_mode: "Markdown" },
-				);
-			}
 			console.error("add error:", e);
 			return ctx.reply("❌ 记账失败，请稍后重试。");
 		}
