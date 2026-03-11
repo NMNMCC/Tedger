@@ -188,3 +188,82 @@ expect(r!.amount).toBe(-100);
 expect(r!.confidence).toBeGreaterThanOrEqual(2);
 });
 });
+
+import { inferAll } from "../src/commands/infer";
+
+describe("inferAll - multi-sentence", () => {
+it("parses diary with multiple transactions", () => {
+const text =
+"早上起床后我先去楼下买了早餐，一共花了28元。" +
+"到了公司，领导通知我这个月绩效奖金已经打到卡里了，一共到账3500元，真是开心。" +
+"中午和同事一起点外卖，我请客总共支出了185元。";
+const results = inferAll(text);
+expect(results.length).toBe(3);
+expect(results[0]!.amount).toBe(-28);
+expect(results[0]!.category).toBe("餐饮");
+expect(results[1]!.amount).toBe(3500);
+expect(results[1]!.category).toBe("工资");
+expect(results[2]!.amount).toBe(-185);
+expect(results[2]!.category).toBe("餐饮");
+});
+
+it("splits multi-amount sentences by comma", () => {
+const text = "睡前看手机发现股票账户分红到账了，一共620元，另外朋友还通过微信转给我上次借他的钱300元。";
+const results = inferAll(text);
+expect(results.length).toBe(2);
+expect(results[0]!.amount).toBe(620);
+expect(results[0]!.category).toBe("理财");
+expect(results[1]!.amount).toBe(300);
+});
+
+it("skips summary sentences (mentions both 收入 and 支出)", () => {
+const text = "午饭花了50元。今天收入1000元，支出500元。";
+const results = inferAll(text);
+expect(results.length).toBe(1);
+expect(results[0]!.amount).toBe(-50);
+});
+
+it("skips date-only sentences", () => {
+const text = "今天是2026年3月12日，天气晴朗。午饭50元。";
+const results = inferAll(text);
+expect(results.length).toBe(1);
+expect(results[0]!.amount).toBe(-50);
+});
+
+it("handles water/electricity as 住房", () => {
+const text = "去银行转账交了水电费，花了320元。";
+const results = inferAll(text);
+expect(results.length).toBe(1);
+expect(results[0]!.amount).toBe(-320);
+expect(results[0]!.category).toBe("住房");
+});
+
+it("still works for short single messages", () => {
+const results = inferAll("午饭50块");
+expect(results.length).toBe(1);
+expect(results[0]!.amount).toBe(-50);
+});
+
+it("parses the full user diary", () => {
+const text =
+"今天是2026年3月12日，天气晴朗，心情不错。" +
+"早上起床后我先去楼下买了早餐，一共花了28元。" +
+"到了公司，领导通知我这个月绩效奖金已经打到卡里了，一共到账3500元，真是开心。" +
+"中午和同事一起点外卖，我请客总共支出了185元。" +
+"下午上班途中顺便去银行转账交了水电费，花了320元。" +
+"晚上回家路上买了些水果和零食，又支出了67元。" +
+"睡前看手机发现股票账户分红到账了，一共620元，另外朋友还通过微信转给我上次借他的钱300元。" +
+"今天一天下来收入总共4420元，支出600元，感觉生活还挺充实的。";
+const results = inferAll(text);
+// Should find 7 transactions, skip date intro + summary
+expect(results.length).toBeGreaterThanOrEqual(6);
+
+const amounts = results.map((r) => r.amount);
+expect(amounts).toContain(-28);    // breakfast
+expect(amounts).toContain(3500);   // bonus
+expect(amounts).toContain(-185);   // lunch
+expect(amounts).toContain(-320);   // utilities
+expect(amounts).toContain(-67);    // snacks
+expect(amounts).toContain(620);    // dividend
+});
+});

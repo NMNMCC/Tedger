@@ -8,7 +8,7 @@ import { stats } from "./commands/stats";
 import { del } from "./commands/del";
 import * as Rate from "./commands/rate";
 import * as Currency from "./commands/currency";
-import { inferFromMessage } from "./commands/infer";
+import { inferAll } from "./commands/infer";
 
 const MD = { parse_mode: "Markdown" as const };
 
@@ -111,18 +111,27 @@ export function createBot(env: Env, runtime: AppRuntime) {
 	bot.on("message:text", async (ctx) => {
 		if (ctx.chat.type !== "private") return;
 
-		const inferred = inferFromMessage(ctx.message.text);
-		if (!inferred) return;
+		const results = inferAll(ctx.message.text);
+		if (results.length === 0) return;
 
-		const msg = await runtime.runPromise(
-			add({
-				...inferred,
-				chatId: String(ctx.chat.id),
-				userId: String(ctx.from.id),
-				userName: ctx.from.first_name ?? "Unknown",
-			}),
-		);
-		return ctx.reply(`🤖 ${msg}`, MD);
+		const msgs: string[] = [];
+		for (const inferred of results) {
+			const msg = await runtime.runPromise(
+				add({
+					...inferred,
+					chatId: String(ctx.chat.id),
+					userId: String(ctx.from.id),
+					userName: ctx.from.first_name ?? "Unknown",
+				}),
+			);
+			msgs.push(msg);
+		}
+
+		const header =
+			results.length > 1
+				? `🤖 识别到 ${results.length} 笔交易:\n\n`
+				: "🤖 ";
+		return ctx.reply(`${header}${msgs.join("\n")}`, MD);
 	});
 
 	return bot;
