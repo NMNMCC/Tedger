@@ -30,18 +30,30 @@ export interface ParsedEntry {
 }
 
 /**
- * Parse: <amount> [currency] [category] [note...]
- * - "100" → 100, null, 其他, ""
- * - "100 USD" → 100, USD, 其他, ""
- * - "100 餐饮" → 100, null, 餐饮, ""
- * - "100 USD 餐饮 午饭" → 100, USD, 餐饮, "午饭"
+ * Parse: [+|-]<amount> [currency] [category] [note...]
+ * Default sign is - (expense). Prefix + for income.
+ * - "100"            → -100, null, 其他, ""   (expense)
+ * - "+100"           →  100, null, 其他, ""   (income)
+ * - "-50 USD 餐饮"   → -50,  USD, 餐饮, ""   (expense)
+ * - "+5000 工资 12月" →  5000, null, 工资, "12月" (income)
  */
 export function parseAddCommand(text: string): ParsedEntry | null {
 	const parts = text.trim().split(/\s+/);
 	if (parts.length === 0 || !parts[0]) return null;
 
-	const amount = parseFloat(parts[0]);
-	if (isNaN(amount) || amount <= 0) return null;
+	const raw = parts[0];
+	let sign = -1; // default: expense
+	let numStr = raw;
+	if (raw.startsWith("+")) {
+		sign = 1;
+		numStr = raw.slice(1);
+	} else if (raw.startsWith("-")) {
+		sign = -1;
+		numStr = raw.slice(1);
+	}
+
+	const absAmount = parseFloat(numStr);
+	if (isNaN(absAmount) || absAmount <= 0) return null;
 
 	let currency: string | null = null;
 	let category = "其他";
@@ -60,7 +72,7 @@ export function parseAddCommand(text: string): ParsedEntry | null {
 	}
 
 	const note = parts.slice(noteStart).join(" ");
-	return { amount, currency, category, note };
+	return { amount: absAmount * sign, currency, category, note };
 }
 
 export function parseRateCommand(
@@ -87,7 +99,8 @@ export function parseRateCommand(
 }
 
 export function fmt(amount: number, currency: string): string {
-	return `${amount.toFixed(2)} ${currency}`;
+	const prefix = amount > 0 ? "+" : "";
+	return `${prefix}${amount.toFixed(2)} ${currency}`;
 }
 
 export function fmtDate(timestamp: number): string {

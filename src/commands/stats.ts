@@ -21,15 +21,38 @@ export const stats = (p: StatsParams) =>
 
 		if (categories.length === 0) return `📊 ${label}暂无记录`;
 
-		const total = categories.reduce((s, c) => s + c.total, 0);
-		const totalCount = categories.reduce((s, c) => s + c.count, 0);
+		const expenseCats = categories.filter((c) => c.total < 0);
+		const incomeCats = categories.filter((c) => c.total > 0);
+		const expenseTotal = expenseCats.reduce((s, c) => s + c.total, 0);
+		const incomeTotal = incomeCats.reduce((s, c) => s + c.total, 0);
+		const expenseCount = expenseCats.reduce((s, c) => s + c.count, 0);
+		const incomeCount = incomeCats.reduce((s, c) => s + c.count, 0);
+		const net = expenseTotal + incomeTotal;
 
 		let msg = `📊 *${label}统计* (${baseCurrency})\n\n`;
-		msg += `💰 总计: *${fmt(total, baseCurrency)}* (${totalCount} 笔)\n\n`;
-		msg += `📁 *分类:*\n`;
-		for (const c of categories) {
-			const pct = ((c.total / total) * 100).toFixed(0);
-			msg += `  ${c.category}: ${fmt(c.total, baseCurrency)} (${c.count}笔, ${pct}%)\n`;
+		if (expenseCats.length > 0) {
+			msg += `📉 支出: *${fmt(expenseTotal, baseCurrency)}* (${expenseCount} 笔)\n`;
+		}
+		if (incomeCats.length > 0) {
+			msg += `📈 收入: *${fmt(incomeTotal, baseCurrency)}* (${incomeCount} 笔)\n`;
+		}
+		msg += `💰 净额: *${fmt(net, baseCurrency)}*\n`;
+
+		if (expenseCats.length > 0) {
+			const absTotal = Math.abs(expenseTotal);
+			msg += `\n📁 *支出分类:*\n`;
+			for (const c of expenseCats) {
+				const pct = ((Math.abs(c.total) / absTotal) * 100).toFixed(0);
+				msg += `  ${c.category}: ${fmt(c.total, baseCurrency)} (${c.count}笔, ${pct}%)\n`;
+			}
+		}
+
+		if (incomeCats.length > 0) {
+			msg += `\n📁 *收入分类:*\n`;
+			for (const c of incomeCats) {
+				const pct = ((c.total / incomeTotal) * 100).toFixed(0);
+				msg += `  ${c.category}: ${fmt(c.total, baseCurrency)} (${c.count}笔, ${pct}%)\n`;
+			}
 		}
 
 		if (p.isGroup && users.length > 0) {

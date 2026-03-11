@@ -1,7 +1,6 @@
 import type { ParsedEntry } from '../helpers';
 
 // ── Currency ────────────────────────────────────────────
-// Strong signals: matched anywhere in text
 const STRONG_CURRENCY: [RegExp, string][] = [
 	[/美[元金]|美刀|\bUSD\b/i, 'USD'],
 	[/人民币|\bRMB\b|\bCNY\b/i, 'CNY'],
@@ -15,7 +14,6 @@ const STRONG_CURRENCY: [RegExp, string][] = [
 	[/\bUSDT\b/i, 'USDT'],
 ];
 
-// Weak signals: only count when directly after a number (e.g. "50块")
 const WEAK_SUFFIX: Record<string, string> = {
 	块: 'CNY',
 	元: 'CNY',
@@ -36,15 +34,23 @@ const CATEGORY_RULES: [string[], string][] = [
 	[['话费', '流量', '网费', '宽带', '充值'], '通讯'],
 	[['红包', '礼物', '份子', '请客', 'AA'], '社交'],
 	[['理发', '快递', '日用', '洗衣'], '日用'],
+	// Income categories
+	[['工资', '薪水', '薪资', '月薪', '奖金', '年终奖', '补贴', '津贴'], '工资'],
+	[['利息', '分红', '股息', '收益', '理财收益'], '理财'],
+	[['退款', '退货', '退费', '退钱'], '退款'],
 ];
 
-// Verbs that boost confidence ("expense" intent)
+// Categories that default to income direction
+const INCOME_CATEGORIES = new Set(['工资', '理财', '退款']);
+
+// ── Direction signals ───────────────────────────────────
 const EXPENSE_VERBS = /花|买|付|充|租|记[一笔账]?|报销|转|打赏|订/;
+const INCOME_VERBS = /收[到了入]|赚[了到]?|到账|入账|回款|中[了奖]/;
 
 // Cleanup patterns for note extraction
 const STRIP_CURRENCY = /\bUSD\b|\bCNY\b|\bJPY\b|\bEUR\b|\bGBP\b|\bHKD\b|\bTWD\b|\bKRW\b|\bRMB\b|\bUSDT\b|\bSGD\b/gi;
 const STRIP_CN_CURRENCY = /美[元金]|美刀|人民币|日[元円]|欧元|英镑|港[币元]|台[币元]|韩[元圆]|新加坡[元币]/g;
-const STRIP_VERBS = /花了?|用了?|付了?|给了?|转了?|充了?|买了?/g;
+const STRIP_VERBS = /花了?|用了?|付了?|给了?|转了?|充了?|买了?|收到了?|赚了?|到账|入账/g;
 
 // ── Helpers ─────────────────────────────────────────────
 
@@ -78,17 +84,14 @@ function inferCategory(text: string): string {
 
 // ── Core algorithm ──────────────────────────────────────
 //
-// 1. Scan for numbers, skipping date-context (3月, 15号…)
-// 2. If a weak currency suffix (块/元/刀) follows the number, capture it
+// 1. Scan for [±]numbers, skipping date/quantity context
+// 2. Capture optional weak currency suffix (块/元/刀)
 // 3. Detect strong currency signals anywhere in text
 // 4. Match category keywords
-// 5. Score confidence; require ≥ 2 to accept
-//    +1  found a positive number
-//    +1  currency detected (strong or weak)
-//    +1  category != "其他"
-//    +1  expense verb present
-//    +1  message is short (≤ 30 chars)
-// 6. Build note from leftover text
+// 5. Determine direction: explicit sign > income verbs > income category > expense
+// 6. Score confidence ≥ 2 to accept
+//    +1 number found, +1 currency, +1 category, +1 intent verb, +1 short msg
+// 7. Build note from leftover text
 
 export interface InferResult extends ParsedEntry {
 	confidence: number;
@@ -97,26 +100,35 @@ export interface InferResult extends ParsedEntry {
 export function inferFromMessage(text: string): InferResult | null {
 	if (/^\//.test(text) || text.length > 100) return null;
 
-	// Step 1+2: extract numbers and optional weak suffix
-	const re = /(\d+(?:\.\d{1,2})?)\s*([块元刀])?/g;
+	// Step 1+2: extract optional sign, number, optional weak suffix
+	const re = /([+-]?)(\d+(?:\.\d{1,2})?)\s*([块元刀])?/g;
 	let best: {
-		amount: number;
+		absAmount: number;
 		raw: string;
 		weakCurrency: string | null;
+		explicitSign: 1 | -1 | 0;
 	} | null = null;
 
 	let m: RegExpExecArray | null;
 	while ((m = re.exec(text)) !== null) {
-		if (isDateContext(text, m.index, m[1]!.length)) continue;
-		if (!m[2] && isQuantityContext(text, m.index, m[1]!.length)) continue;
-		const val = parseFloat(m[1]!);
-		if (val <= 0) continue;
-		// take the first valid number
+		const signStr = m[1]!;
+		const numStr = m[2]!;
+		const suffix = m[3];
+		const numStart = m.index + signStr.length;
+		const numLen = numStr.length;
+
+		if (isDateContext(text, numStart, numLen)) continue;
+		if (!suffix && isQuantityContext(text, numStart, numLen)) continue;
+
+		const absVal = parseFloat(numStr);
+		if (absVal <= 0) continue;
+
 		if (!best) {
 			best = {
-				amount: val,
+				absAmount: absVal,
 				raw: m[0],
-				weakCurrency: m[2] ? (WEAK_SUFFIX[m[2]] ?? null) : null,
+				weakCurrency: suffix ? (WEAK_SUFFIX[suffix] ?? null) : null,
+				explicitSign: signStr === '+' ? 1 : signStr === '-' ? -1 : 0,
 			};
 		}
 	}
@@ -129,16 +141,25 @@ export function inferFromMessage(text: string): InferResult | null {
 	// Step 4: category
 	const category = inferCategory(text);
 
-	// Step 5: confidence
+	// Step 5: direction — explicit sign > income verb > income category > expense
+	let isIncome = false;
+	if (best.explicitSign === 1) isIncome = true;
+	else if (best.explicitSign === -1) isIncome = false;
+	else if (INCOME_VERBS.test(text)) isIncome = true;
+	else if (INCOME_CATEGORIES.has(category)) isIncome = true;
+
+	const sign = isIncome ? 1 : -1;
+
+	// Step 6: confidence
 	let confidence = 1;
 	if (currency) confidence++;
 	if (category !== '其他') confidence++;
-	if (EXPENSE_VERBS.test(text)) confidence++;
+	if (EXPENSE_VERBS.test(text) || INCOME_VERBS.test(text)) confidence++;
 	if (text.length <= 30) confidence++;
 
 	if (confidence < 2) return null;
 
-	// Step 6: build note
+	// Step 7: build note
 	const note = text
 		.replace(best.raw, '')
 		.replace(STRIP_CURRENCY, '')
@@ -147,5 +168,5 @@ export function inferFromMessage(text: string): InferResult | null {
 		.replace(/\s+/g, ' ')
 		.trim();
 
-	return { amount: best.amount, currency, category, note, confidence };
+	return { amount: best.absAmount * sign, currency, category, note, confidence };
 }

@@ -33,7 +33,8 @@ export const add = (p: AddParams) =>
 			baseCurrency,
 		});
 
-		let msg = `✅ #${entry.id} ${fmt(entry.amount, entry.currency)}`;
+		const icon = entry.amount >= 0 ? "📈" : "📉";
+		let msg = `${icon} #${entry.id} ${fmt(entry.amount, entry.currency)}`;
 		if (entry.currency !== entry.baseCurrency) {
 			msg += ` ≈ ${fmt(entry.convertedAmount, entry.baseCurrency)}`;
 		}

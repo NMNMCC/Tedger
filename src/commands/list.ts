@@ -16,7 +16,8 @@ export const list = (p: ListParams) =>
 		if (entries.length === 0) return "📋 暂无记录";
 
 		const lines = entries.map((e) => {
-			let line = `#${e.id} ${fmt(e.amount, e.currency)}`;
+			const icon = e.amount >= 0 ? "📈" : "📉";
+			let line = `${icon} #${e.id} ${fmt(e.amount, e.currency)}`;
 			if (e.currency !== e.baseCurrency) {
 				line += ` ≈${fmt(e.convertedAmount, e.baseCurrency)}`;
 			}

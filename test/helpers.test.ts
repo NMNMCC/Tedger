@@ -2,8 +2,17 @@ import { describe, it, expect } from "vitest";
 import { parseAddCommand, parseRateCommand, fmt, fmtDate, periodSince, periodLabel } from "../src/helpers";
 
 describe("parseAddCommand", () => {
-	it("parses amount only", () => {
+	it("parses amount only (default expense)", () => {
 		expect(parseAddCommand("100")).toEqual({
+			amount: -100,
+			currency: null,
+			category: "其他",
+			note: "",
+		});
+	});
+
+	it("parses explicit + as income", () => {
+		expect(parseAddCommand("+100")).toEqual({
 			amount: 100,
 			currency: null,
 			category: "其他",
@@ -11,18 +20,36 @@ describe("parseAddCommand", () => {
 		});
 	});
 
-	it("parses amount + currency", () => {
+	it("parses explicit - as expense", () => {
+		expect(parseAddCommand("-5")).toEqual({
+			amount: -5,
+			currency: null,
+			category: "其他",
+			note: "",
+		});
+	});
+
+	it("parses amount + currency (expense)", () => {
 		expect(parseAddCommand("50 USD")).toEqual({
-			amount: 50,
+			amount: -50,
 			currency: "USD",
 			category: "其他",
 			note: "",
 		});
 	});
 
+	it("parses income with currency + category", () => {
+		expect(parseAddCommand("+5000 CNY 工资 12月")).toEqual({
+			amount: 5000,
+			currency: "CNY",
+			category: "工资",
+			note: "12月",
+		});
+	});
+
 	it("parses amount + category (no currency)", () => {
 		expect(parseAddCommand("200 交通")).toEqual({
-			amount: 200,
+			amount: -200,
 			currency: null,
 			category: "交通",
 			note: "",
@@ -31,7 +58,7 @@ describe("parseAddCommand", () => {
 
 	it("parses full: amount + currency + category + note", () => {
 		expect(parseAddCommand("50 USD 餐饮 午饭")).toEqual({
-			amount: 50,
+			amount: -50,
 			currency: "USD",
 			category: "餐饮",
 			note: "午饭",
@@ -40,7 +67,7 @@ describe("parseAddCommand", () => {
 
 	it("handles multi-word note", () => {
 		expect(parseAddCommand("100 CNY 交通 打车去机场 很贵")).toEqual({
-			amount: 100,
+			amount: -100,
 			currency: "CNY",
 			category: "交通",
 			note: "打车去机场 很贵",
@@ -51,9 +78,9 @@ describe("parseAddCommand", () => {
 		expect(parseAddCommand("30 eur 购物")?.currency).toBe("EUR");
 	});
 
-	it("returns null for non-positive amount", () => {
+	it("returns null for zero and invalid", () => {
 		expect(parseAddCommand("0")).toBeNull();
-		expect(parseAddCommand("-5")).toBeNull();
+		expect(parseAddCommand("+0")).toBeNull();
 		expect(parseAddCommand("abc")).toBeNull();
 	});
 
@@ -90,9 +117,14 @@ describe("parseRateCommand", () => {
 });
 
 describe("fmt", () => {
-	it("formats amount with currency", () => {
-		expect(fmt(100, "CNY")).toBe("100.00 CNY");
-		expect(fmt(3.5, "USD")).toBe("3.50 USD");
+	it("formats positive amount with + prefix", () => {
+		expect(fmt(100, "CNY")).toBe("+100.00 CNY");
+	});
+	it("formats negative amount", () => {
+		expect(fmt(-50, "USD")).toBe("-50.00 USD");
+	});
+	it("formats zero without prefix", () => {
+		expect(fmt(0, "CNY")).toBe("0.00 CNY");
 	});
 });
 

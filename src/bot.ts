@@ -16,7 +16,7 @@ export function createBot(env: Env, runtime: AppRuntime) {
 	const bot = new Bot(env.BOT_TOKEN);
 
 	bot.api.setMyCommands([
-		{ command: "add", description: "记账 - /add 金额 [货币] [分类] [备注]" },
+		{ command: "add", description: "记账 - /add [+|-]金额 [货币] [分类] [备注]" },
 		{ command: "list", description: "查看最近记录" },
 		{ command: "stats", description: "统计 - /stats [today|week|month|all]" },
 		{ command: "del", description: "删除记录 - /del ID" },
@@ -32,7 +32,11 @@ export function createBot(env: Env, runtime: AppRuntime) {
 	bot.command("help", (ctx) => ctx.reply(HELP_TEXT, MD));
 
 	bot.command("add", async (ctx) => {
-		if (!ctx.match) return ctx.reply("用法: `/add 金额 [货币] [分类] [备注]`", MD);
+		if (!ctx.match)
+			return ctx.reply(
+				"用法: `/add [+|-]金额 [货币] [分类] [备注]`\n默认为支出，`+` 前缀记收入",
+				MD,
+			);
 		const parsed = parseAddCommand(ctx.match);
 		if (!parsed) return ctx.reply("❌ 无法解析，金额必须为正数。");
 		const msg = await runtime.runPromise(
