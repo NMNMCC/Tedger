@@ -20,6 +20,16 @@ export function createBot(env: Env) {
 	const bot = new Bot(env.BOT_TOKEN);
 	const db = drizzle(env.DB);
 
+	bot.api.setMyCommands([
+		{ command: "add", description: "记账 - /add 金额 [货币] [分类] [备注]" },
+		{ command: "list", description: "查看最近记录" },
+		{ command: "stats", description: "统计 - /stats [today|week|month|all]" },
+		{ command: "del", description: "删除记录 - /del ID" },
+		{ command: "rate", description: "汇率管理 - /rate [FROM/TO] [汇率]" },
+		{ command: "currency", description: "设置默认货币" },
+		{ command: "help", description: "使用帮助" },
+	]);
+
 	const MainLayer = Layer.mergeAll(
 		Layer.succeed(LedgerService, makeLedgerService(db)),
 		Layer.succeed(ExchangeService, makeExchangeService(db)),
