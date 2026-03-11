@@ -8,6 +8,7 @@ import { stats } from "./commands/stats";
 import { del } from "./commands/del";
 import * as Rate from "./commands/rate";
 import * as Currency from "./commands/currency";
+import { inferFromMessage } from "./commands/infer";
 
 const MD = { parse_mode: "Markdown" as const };
 
@@ -100,6 +101,24 @@ export function createBot(env: Env, runtime: AppRuntime) {
 			? await runtime.runPromise(Currency.setCurrency(String(ctx.chat.id), code))
 			: await runtime.runPromise(Currency.getCurrency(String(ctx.chat.id)));
 		return ctx.reply(msg, MD);
+	});
+
+	// ── Heuristic inference for plain text (private chat only) ──
+	bot.on("message:text", async (ctx) => {
+		if (ctx.chat.type !== "private") return;
+
+		const inferred = inferFromMessage(ctx.message.text);
+		if (!inferred) return;
+
+		const msg = await runtime.runPromise(
+			add({
+				...inferred,
+				chatId: String(ctx.chat.id),
+				userId: String(ctx.from.id),
+				userName: ctx.from.first_name ?? "Unknown",
+			}),
+		);
+		return ctx.reply(`🤖 ${msg}`, MD);
 	});
 
 	return bot;
