@@ -107,9 +107,22 @@ export function createBot(env: Env, runtime: AppRuntime) {
 		return ctx.reply(msg, MD);
 	});
 
-	// ── Heuristic inference for plain text (private chat only) ──
+	// ── Heuristic inference for plain text (private & group chats) ──
 	bot.on("message:text", async (ctx) => {
-		if (ctx.chat.type !== "private") return;
+		// In groups, require @bot mention to avoid false triggers
+		if (ctx.chat.type !== "private") {
+			const botUsername = ctx.me?.username;
+			if (!botUsername) return;
+			
+			// Check if bot is mentioned in the message
+			const entities = ctx.message?.entities;
+			const mentioned = entities?.some(
+				(e) => 
+					(e.type === "mention" && ctx.message?.text?.slice(e.offset, e.offset + e.length).toLowerCase() === `@${botUsername.toLowerCase()}`) ||
+					(e.type === "text_mention" && e.user?.id === ctx.me?.id)
+			);
+			if (!mentioned) return;
+		}
 
 		const results = inferAll(ctx.message.text);
 		if (results.length === 0) return;
