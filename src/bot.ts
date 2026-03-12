@@ -1,4 +1,4 @@
-import { Bot } from "grammy";
+import { Bot, Context, MiddlewareFn } from "grammy";
 import type { AppRuntime } from "./runtime";
 import { parseAddCommand, parseRateCommand } from "./helpers";
 import { START_TEXT, HELP_TEXT } from "./commands/start";
@@ -9,6 +9,9 @@ import { del } from "./commands/del";
 import * as Rate from "./commands/rate";
 import * as Currency from "./commands/currency";
 import { inferAll } from "./commands/infer";
+import { handleAuth, AUTH_HELP_TEXT } from "./commands/auth";
+import { AuthService } from "./services/auth";
+import { Effect } from "effect";
 
 const MD = { parse_mode: "Markdown" as const };
 
@@ -22,14 +25,74 @@ export function createBot(env: Env, runtime: AppRuntime) {
 		{ command: "del", description: "删除记录 - /del ID" },
 		{ command: "rate", description: "汇率管理 - /rate [FROM/TO] [汇率]" },
 		{ command: "currency", description: "设置默认货币" },
+		{ command: "auth", description: "权限管理 - /auth [add|remove|list|check]" },
 		{ command: "help", description: "使用帮助" },
 	]);
+
+	const authCheck: MiddlewareFn = async (ctx, next) => {
+		if (!ctx.from || !ctx.chat) return next();
+
+		const userId = String(ctx.from.id);
+		const chatId = String(ctx.chat.id);
+		const isGroup = ctx.chat.type !== "private";
+
+		const hasPermission = await runtime.runPromise(
+			Effect.gen(function* () {
+				const auth = yield* AuthService;
+				return yield* auth.checkPermission({ userId, chatId, isGroup });
+			}),
+		);
+
+		if (!hasPermission) {
+			return ctx.reply("⛔ 您没有权限使用此机器人。请联系管理员授权。");
+		}
+
+		return next();
+	};
 
 	bot.command("start", (ctx) =>
 		ctx.reply(START_TEXT(ctx.chat.type !== "private"), MD),
 	);
 
 	bot.command("help", (ctx) => ctx.reply(HELP_TEXT, MD));
+
+	bot.command("auth", async (ctx) => {
+		const parts = (ctx.match || "").trim().split(/\s+/);
+		const action = parts[0] || "help";
+
+		if (action === "check" || action === "help") {
+			const msg = await runtime.runPromise(
+				handleAuth({
+					action,
+					chatId: String(ctx.chat.id),
+					isGroup: ctx.chat.type !== "private",
+					userId: String(ctx.from!.id),
+					userName: ctx.from!.first_name ?? "Unknown",
+				}),
+			);
+			return ctx.reply(msg, MD);
+		}
+
+		return authCheck(ctx, async () => {
+			const targetUsername = parts[1];
+			const role = parts[2] as "admin" | "user" | undefined;
+
+			const msg = await runtime.runPromise(
+				handleAuth({
+					action,
+					targetUsername,
+					role,
+					chatId: String(ctx.chat.id),
+					isGroup: ctx.chat.type !== "private",
+					userId: String(ctx.from!.id),
+					userName: ctx.from!.first_name ?? "Unknown",
+				}),
+			);
+			await ctx.reply(msg, MD);
+		});
+	});
+
+	bot.use(authCheck);
 
 	bot.command("add", async (ctx) => {
 		if (!ctx.match)
@@ -107,23 +170,7 @@ export function createBot(env: Env, runtime: AppRuntime) {
 		return ctx.reply(msg, MD);
 	});
 
-	// ── Heuristic inference for plain text (private & group chats) ──
 	bot.on("message:text", async (ctx) => {
-		// In groups, require @bot mention to avoid false triggers
-		if (ctx.chat.type !== "private") {
-			const botUsername = ctx.me?.username;
-			if (!botUsername) return;
-			
-			// Check if bot is mentioned in the message
-			const entities = ctx.message?.entities;
-			const mentioned = entities?.some(
-				(e) => 
-					(e.type === "mention" && ctx.message?.text?.slice(e.offset, e.offset + e.length).toLowerCase() === `@${botUsername.toLowerCase()}`) ||
-					(e.type === "text_mention" && e.user?.id === ctx.me?.id)
-			);
-			if (!mentioned) return;
-		}
-
 		const results = inferAll(ctx.message.text);
 		if (results.length === 0) return;
 

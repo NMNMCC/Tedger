@@ -1,5 +1,22 @@
-import { sqliteTable, text, integer, real } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, real, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
+
+export type Role = "owner" | "admin" | "user";
+
+// chatId: null=global (owner/admin), "private"=private chats, or group ID
+export const permissions = sqliteTable("permissions", {
+	id: integer("id").primaryKey({ autoIncrement: true }),
+	userId: text("user_id").notNull(),
+	userName: text("user_name").default(""),
+	role: text("role", { enum: ["owner", "admin", "user"] }).notNull(),
+	chatId: text("chat_id"),
+	grantedBy: text("granted_by").notNull(),
+	createdAt: integer("created_at")
+		.notNull()
+		.default(sql`(strftime('%s', 'now'))`),
+}, (table) => ({
+	userChatUnique: uniqueIndex("user_chat_unique").on(table.userId, table.chatId),
+}));
 
 export const ledgerEntries = sqliteTable("ledger_entries", {
 	id: integer("id").primaryKey({ autoIncrement: true }),
@@ -42,3 +59,5 @@ export type LedgerEntry = typeof ledgerEntries.$inferSelect;
 export type NewLedgerEntry = typeof ledgerEntries.$inferInsert;
 export type ExchangeRate = typeof exchangeRates.$inferSelect;
 export type ChatSetting = typeof chatSettings.$inferSelect;
+export type Permission = typeof permissions.$inferSelect;
+export type NewPermission = typeof permissions.$inferInsert;
