@@ -10,8 +10,12 @@
 	"observability": {
 		"enabled": true,
 	},
-	"compatibility_flags": ["nodejs_compat"],
-	"placement": { "mode": "smart" },
+	"compatibility_flags": [
+		"nodejs_compat"
+	],
+	"placement": {
+		"mode": "smart"
+	},
 	"d1_databases": [
 		{
 			"binding": "DB",
@@ -20,6 +24,6 @@
 		},
 	],
 	"vars": {
-		"OWNER_ID": "",
+		"OWNER_ID": "1924296702",
 	},
 }

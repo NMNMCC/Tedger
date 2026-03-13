@@ -2,9 +2,7 @@ import { Effect, Context } from "effect";
 import { type DrizzleD1Database } from "drizzle-orm/d1";
 import { eq, and, desc, gte, sql } from "drizzle-orm";
 import { ledgerEntries, chatSettings } from "../db/schema";
-
-const dbEffect = <A>(f: () => Promise<A>) =>
-	Effect.tryPromise(f).pipe(Effect.orDie);
+import { dbEffect, DatabaseError } from "./errors";
 
 export interface AddEntryInput {
 	chatId: string;
@@ -36,36 +34,38 @@ export class LedgerService extends Context.Tag("LedgerService")<
 	{
 		readonly add: (
 			input: AddEntryInput,
-		) => Effect.Effect<typeof ledgerEntries.$inferSelect>;
+		) => Effect.Effect<typeof ledgerEntries.$inferSelect, DatabaseError>;
 		readonly list: (
 			chatId: string,
 			limit: number,
-		) => Effect.Effect<(typeof ledgerEntries.$inferSelect)[]>;
+		) => Effect.Effect<(typeof ledgerEntries.$inferSelect)[], DatabaseError>;
 		readonly remove: (
 			id: number,
 			chatId: string,
 			userId: string,
-		) => Effect.Effect<boolean>;
+		) => Effect.Effect<boolean, DatabaseError>;
 		readonly statsByCategory: (
 			chatId: string,
 			since: number,
-		) => Effect.Effect<CategoryStats[]>;
+		) => Effect.Effect<CategoryStats[], DatabaseError>;
 		readonly statsByUser: (
 			chatId: string,
 			since: number,
-		) => Effect.Effect<UserStats[]>;
-		readonly getBaseCurrency: (chatId: string) => Effect.Effect<string>;
+		) => Effect.Effect<UserStats[], DatabaseError>;
+		readonly getBaseCurrency: (
+			chatId: string,
+		) => Effect.Effect<string, DatabaseError>;
 		readonly setBaseCurrency: (
 			chatId: string,
 			currency: string,
-		) => Effect.Effect<void>;
+		) => Effect.Effect<void, DatabaseError>;
 	}
 >() {}
 
 export const makeLedgerService = (db: DrizzleD1Database) =>
 	LedgerService.of({
 		add: (input) =>
-			dbEffect(() =>
+			dbEffect("ledger.add", () =>
 				db
 					.insert(ledgerEntries)
 					.values(input)
@@ -74,7 +74,7 @@ export const makeLedgerService = (db: DrizzleD1Database) =>
 			),
 
 		list: (chatId, limit) =>
-			dbEffect(() =>
+			dbEffect("ledger.list", () =>
 				db
 					.select()
 					.from(ledgerEntries)
@@ -84,7 +84,7 @@ export const makeLedgerService = (db: DrizzleD1Database) =>
 			),
 
 		remove: (id, chatId, userId) =>
-			dbEffect(() =>
+			dbEffect("ledger.remove", () =>
 				db
 					.delete(ledgerEntries)
 					.where(
@@ -99,7 +99,7 @@ export const makeLedgerService = (db: DrizzleD1Database) =>
 			),
 
 		statsByCategory: (chatId, since) =>
-			dbEffect(() =>
+			dbEffect("ledger.statsByCategory", () =>
 				db
 					.select({
 						category: ledgerEntries.category,
@@ -117,7 +117,7 @@ export const makeLedgerService = (db: DrizzleD1Database) =>
 			),
 
 		statsByUser: (chatId, since) =>
-			dbEffect(() =>
+			dbEffect("ledger.statsByUser", () =>
 				db
 					.select({
 						userId: ledgerEntries.userId,
@@ -136,7 +136,7 @@ export const makeLedgerService = (db: DrizzleD1Database) =>
 			),
 
 		getBaseCurrency: (chatId) =>
-			dbEffect(() =>
+			dbEffect("ledger.getBaseCurrency", () =>
 				db
 					.select()
 					.from(chatSettings)
@@ -145,7 +145,7 @@ export const makeLedgerService = (db: DrizzleD1Database) =>
 			),
 
 		setBaseCurrency: (chatId, currency) =>
-			dbEffect(() =>
+			dbEffect("ledger.setBaseCurrency", () =>
 				db
 					.insert(chatSettings)
 					.values({ chatId, baseCurrency: currency })

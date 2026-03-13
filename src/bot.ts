@@ -1,4 +1,4 @@
-import { Bot, Context, MiddlewareFn } from "grammy";
+import { Bot, MiddlewareFn } from "grammy";
 import type { AppRuntime } from "./runtime";
 import { parseAddCommand, parseRateCommand } from "./helpers";
 import { START_TEXT, HELP_TEXT } from "./commands/start";
@@ -12,6 +12,7 @@ import { inferAll } from "./commands/infer";
 import { handleAuth, AUTH_HELP_TEXT } from "./commands/auth";
 import { AuthService } from "./services/auth";
 import { Effect } from "effect";
+import { handleErrors } from "./error-handler";
 
 const MD = { parse_mode: "Markdown" as const };
 
@@ -36,12 +37,18 @@ export function createBot(env: Env, runtime: AppRuntime) {
 		const chatId = String(ctx.chat.id);
 		const isGroup = ctx.chat.type !== "private";
 
-		const hasPermission = await runtime.runPromise(
-			Effect.gen(function* () {
-				const auth = yield* AuthService;
-				return yield* auth.checkPermission({ userId, chatId, isGroup });
-			}),
-		);
+		let hasPermission = false;
+		try {
+			hasPermission = await runtime.runPromise(
+				Effect.gen(function* () {
+					const auth = yield* AuthService;
+					return yield* auth.checkPermission({ userId, chatId, isGroup });
+				}),
+			);
+		} catch (error) {
+			console.error("Auth check failed:", error);
+			hasPermission = false;
+		}
 
 		if (!hasPermission) {
 			return ctx.reply("⛔ 您没有权限使用此机器人。请联系管理员授权。");
@@ -62,13 +69,15 @@ export function createBot(env: Env, runtime: AppRuntime) {
 
 		if (action === "check" || action === "help") {
 			const msg = await runtime.runPromise(
-				handleAuth({
-					action,
-					chatId: String(ctx.chat.id),
-					isGroup: ctx.chat.type !== "private",
-					userId: String(ctx.from!.id),
-					userName: ctx.from!.first_name ?? "Unknown",
-				}),
+				handleErrors(
+					handleAuth({
+						action,
+						chatId: String(ctx.chat.id),
+						isGroup: ctx.chat.type !== "private",
+						userId: String(ctx.from!.id),
+						userName: ctx.from!.first_name ?? "Unknown",
+					}),
+				),
 			);
 			return ctx.reply(msg, MD);
 		}
@@ -78,15 +87,17 @@ export function createBot(env: Env, runtime: AppRuntime) {
 			const role = parts[2] as "admin" | "user" | undefined;
 
 			const msg = await runtime.runPromise(
-				handleAuth({
-					action,
-					targetUsername,
-					role,
-					chatId: String(ctx.chat.id),
-					isGroup: ctx.chat.type !== "private",
-					userId: String(ctx.from!.id),
-					userName: ctx.from!.first_name ?? "Unknown",
-				}),
+				handleErrors(
+					handleAuth({
+						action,
+						targetUsername,
+						role,
+						chatId: String(ctx.chat.id),
+						isGroup: ctx.chat.type !== "private",
+						userId: String(ctx.from!.id),
+						userName: ctx.from!.first_name ?? "Unknown",
+					}),
+				),
 			);
 			await ctx.reply(msg, MD);
 		});
@@ -103,34 +114,40 @@ export function createBot(env: Env, runtime: AppRuntime) {
 		const parsed = parseAddCommand(ctx.match);
 		if (!parsed) return ctx.reply("❌ 无法解析，金额必须为正数。");
 		const msg = await runtime.runPromise(
-			add({
-				...parsed,
-				chatId: String(ctx.chat.id),
-				userId: String(ctx.from!.id),
-				userName: ctx.from!.first_name ?? "Unknown",
-			}),
+			handleErrors(
+				add({
+					...parsed,
+					chatId: String(ctx.chat.id),
+					userId: String(ctx.from!.id),
+					userName: ctx.from!.first_name ?? "Unknown",
+				}),
+			),
 		);
 		return ctx.reply(msg, MD);
 	});
 
 	bot.command("list", async (ctx) => {
 		const msg = await runtime.runPromise(
-			list({
-				chatId: String(ctx.chat.id),
-				limit: Math.min(parseInt(ctx.match || "10") || 10, 50),
-				isGroup: ctx.chat.type !== "private",
-			}),
+			handleErrors(
+				list({
+					chatId: String(ctx.chat.id),
+					limit: Math.min(parseInt(ctx.match || "10") || 10, 50),
+					isGroup: ctx.chat.type !== "private",
+				}),
+			),
 		);
 		return ctx.reply(msg, MD);
 	});
 
 	bot.command("stats", async (ctx) => {
 		const msg = await runtime.runPromise(
-			stats({
-				chatId: String(ctx.chat.id),
-				period: ctx.match?.trim() || "month",
-				isGroup: ctx.chat.type !== "private",
-			}),
+			handleErrors(
+				stats({
+					chatId: String(ctx.chat.id),
+					period: ctx.match?.trim() || "month",
+					isGroup: ctx.chat.type !== "private",
+				}),
+			),
 		);
 		return ctx.reply(msg, MD);
 	});
@@ -139,7 +156,9 @@ export function createBot(env: Env, runtime: AppRuntime) {
 		const id = parseInt(ctx.match || "");
 		if (isNaN(id)) return ctx.reply("用法: `/del ID`", MD);
 		const msg = await runtime.runPromise(
-			del({ id, chatId: String(ctx.chat.id), userId: String(ctx.from!.id) }),
+			handleErrors(
+				del({ id, chatId: String(ctx.chat.id), userId: String(ctx.from!.id) }),
+			),
 		);
 		return ctx.reply(msg);
 	});
@@ -147,7 +166,7 @@ export function createBot(env: Env, runtime: AppRuntime) {
 	bot.command("rate", async (ctx) => {
 		const text = ctx.match?.trim();
 		if (!text) {
-			return ctx.reply(await runtime.runPromise(Rate.listRates()), MD);
+			return ctx.reply(await runtime.runPromise(handleErrors(Rate.listRates())), MD);
 		}
 		const parsed = parseRateCommand(text);
 		if (!parsed) {
@@ -155,9 +174,9 @@ export function createBot(env: Env, runtime: AppRuntime) {
 		}
 		const msg =
 			parsed.rate === undefined
-				? await runtime.runPromise(Rate.getRate(parsed.from, parsed.to))
+				? await runtime.runPromise(handleErrors(Rate.getRate(parsed.from, parsed.to)))
 				: await runtime.runPromise(
-						Rate.setRate(parsed.from, parsed.to, parsed.rate),
+						handleErrors(Rate.setRate(parsed.from, parsed.to, parsed.rate)),
 					);
 		return ctx.reply(msg, MD);
 	});
@@ -165,8 +184,8 @@ export function createBot(env: Env, runtime: AppRuntime) {
 	bot.command("currency", async (ctx) => {
 		const code = ctx.match?.trim().toUpperCase();
 		const msg = code
-			? await runtime.runPromise(Currency.setCurrency(String(ctx.chat.id), code))
-			: await runtime.runPromise(Currency.getCurrency(String(ctx.chat.id)));
+			? await runtime.runPromise(handleErrors(Currency.setCurrency(String(ctx.chat.id), code)))
+			: await runtime.runPromise(handleErrors(Currency.getCurrency(String(ctx.chat.id))));
 		return ctx.reply(msg, MD);
 	});
 
@@ -177,12 +196,14 @@ export function createBot(env: Env, runtime: AppRuntime) {
 		const msgs: string[] = [];
 		for (const inferred of results) {
 			const msg = await runtime.runPromise(
-				add({
-					...inferred,
-					chatId: String(ctx.chat.id),
-					userId: String(ctx.from.id),
-					userName: ctx.from.first_name ?? "Unknown",
-				}),
+				handleErrors(
+					add({
+						...inferred,
+						chatId: String(ctx.chat.id),
+						userId: String(ctx.from.id),
+						userName: ctx.from.first_name ?? "Unknown",
+					}),
+				),
 			);
 			msgs.push(msg);
 		}

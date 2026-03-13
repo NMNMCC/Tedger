@@ -1,10 +1,8 @@
 import { Effect, Context } from "effect";
 import { type DrizzleD1Database } from "drizzle-orm/d1";
 import { eq, and, or, isNull } from "drizzle-orm";
-import { permissions, type Role, type Permission, type NewPermission } from "../db/schema";
-
-const dbEffect = <A>(f: () => Promise<A>) =>
-	Effect.tryPromise(f).pipe(Effect.orDie);
+import { permissions, type Role, type Permission } from "../db/schema";
+import { dbEffect, DatabaseError } from "./errors";
 
 export interface AuthCheckInput {
 	userId: string;
@@ -17,29 +15,27 @@ export class AuthService extends Context.Tag("AuthService")<
 	{
 		readonly checkPermission: (
 			input: AuthCheckInput,
-		) => Effect.Effect<boolean>;
+		) => Effect.Effect<boolean, DatabaseError>;
 		readonly getRole: (
 			userId: string,
 			chatId: string | null,
-		) => Effect.Effect<Role | null>;
-		readonly grantPermission: (
-			input: {
-				userId: string;
-				userName: string;
-				role: Role;
-				chatId: string | null;
-				grantedBy: string;
-			},
-		) => Effect.Effect<Permission>;
+		) => Effect.Effect<Role | null, DatabaseError>;
+		readonly grantPermission: (input: {
+			userId: string;
+			userName: string;
+			role: Role;
+			chatId: string | null;
+			grantedBy: string;
+		}) => Effect.Effect<Permission, DatabaseError>;
 		readonly revokePermission: (
 			userId: string,
 			chatId: string | null,
-		) => Effect.Effect<boolean>;
+		) => Effect.Effect<boolean, DatabaseError>;
 		readonly listPermissions: (
 			chatId?: string | null,
-		) => Effect.Effect<Permission[]>;
+		) => Effect.Effect<Permission[], DatabaseError>;
 		readonly isOwner: (userId: string) => Effect.Effect<boolean>;
-		readonly isAdmin: (userId: string) => Effect.Effect<boolean>;
+		readonly isAdmin: (userId: string) => Effect.Effect<boolean, DatabaseError>;
 	}
 >() {}
 
@@ -49,7 +45,7 @@ export const makeAuthService = (db: DrizzleD1Database, ownerId: string) =>
 			Effect.gen(function* () {
 				if (userId === ownerId) return true;
 
-				const globalPerm = yield* dbEffect(() =>
+				const globalPerm = yield* dbEffect("auth.checkPermission.global", () =>
 					db
 						.select()
 						.from(permissions)
@@ -67,22 +63,24 @@ export const makeAuthService = (db: DrizzleD1Database, ownerId: string) =>
 				}
 
 				if (!isGroup) {
-					const privatePerm = yield* dbEffect(() =>
-						db
-							.select()
-							.from(permissions)
-							.where(
-								and(
-									eq(permissions.userId, userId),
-									eq(permissions.chatId, "private"),
-								),
-							)
-							.then((rows) => rows[0]),
+					const privatePerm = yield* dbEffect(
+						"auth.checkPermission.private",
+						() =>
+							db
+								.select()
+								.from(permissions)
+								.where(
+									and(
+										eq(permissions.userId, userId),
+										eq(permissions.chatId, "private"),
+									),
+								)
+								.then((rows) => rows[0]),
 					);
 					return privatePerm?.role === "user" || globalPerm?.role === "user";
 				}
 
-				const groupPerm = yield* dbEffect(() =>
+				const groupPerm = yield* dbEffect("auth.checkPermission.group", () =>
 					db
 						.select()
 						.from(permissions)
@@ -99,7 +97,7 @@ export const makeAuthService = (db: DrizzleD1Database, ownerId: string) =>
 			}),
 
 		getRole: (userId, chatId) =>
-			dbEffect(() => {
+			dbEffect("auth.getRole", () => {
 				const conditions = chatId
 					? and(
 							eq(permissions.userId, userId),
@@ -128,7 +126,7 @@ export const makeAuthService = (db: DrizzleD1Database, ownerId: string) =>
 			}),
 
 		grantPermission: ({ userId, userName, role, chatId, grantedBy }) =>
-			dbEffect(() =>
+			dbEffect("auth.grantPermission", () =>
 				db
 					.insert(permissions)
 					.values({
@@ -147,7 +145,7 @@ export const makeAuthService = (db: DrizzleD1Database, ownerId: string) =>
 			),
 
 		revokePermission: (userId, chatId) =>
-			dbEffect(() => {
+			dbEffect("auth.revokePermission", () => {
 				const condition = chatId
 					? and(
 							eq(permissions.userId, userId),
@@ -166,7 +164,7 @@ export const makeAuthService = (db: DrizzleD1Database, ownerId: string) =>
 			}),
 
 		listPermissions: (chatId) =>
-			dbEffect(() => {
+			dbEffect("auth.listPermissions", () => {
 				const condition = chatId
 					? eq(permissions.chatId, chatId)
 					: isNull(permissions.chatId);
@@ -178,14 +176,13 @@ export const makeAuthService = (db: DrizzleD1Database, ownerId: string) =>
 					.orderBy(permissions.createdAt);
 			}),
 
-		isOwner: (userId) =>
-			Effect.succeed(userId === ownerId),
+		isOwner: (userId) => Effect.succeed(userId === ownerId),
 
 		isAdmin: (userId) =>
 			Effect.gen(function* () {
 				if (userId === ownerId) return true;
 
-				const perm = yield* dbEffect(() =>
+				const perm = yield* dbEffect("auth.isAdmin", () =>
 					db
 						.select()
 						.from(permissions)

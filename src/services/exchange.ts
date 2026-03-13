@@ -1,15 +1,15 @@
-import { Effect, Context, Data, pipe } from "effect";
+import { Effect, Context, Data } from "effect";
 import { type DrizzleD1Database } from "drizzle-orm/d1";
 import { eq, and } from "drizzle-orm";
 import { exchangeRates } from "../db/schema";
-
-const dbEffect = <A>(f: () => Promise<A>) =>
-	Effect.tryPromise(f).pipe(Effect.orDie);
+import { dbEffect, DatabaseError } from "./errors";
 
 export class RateNotFoundError extends Data.TaggedError("RateNotFoundError")<{
 	readonly from: string;
 	readonly to: string;
 }> {}
+
+export type ExchangeError = DatabaseError | RateNotFoundError;
 
 export interface ExchangeRateInfo {
 	from: string;
@@ -23,24 +23,24 @@ export class ExchangeService extends Context.Tag("ExchangeService")<
 		readonly getRate: (
 			from: string,
 			to: string,
-		) => Effect.Effect<number | null>;
+		) => Effect.Effect<number | null, DatabaseError>;
 		readonly setRate: (
 			from: string,
 			to: string,
 			rate: number,
-		) => Effect.Effect<void>;
+		) => Effect.Effect<void, DatabaseError>;
 		readonly convert: (
 			amount: number,
 			from: string,
 			to: string,
-		) => Effect.Effect<number, RateNotFoundError>;
-		readonly listRates: () => Effect.Effect<ExchangeRateInfo[]>;
+		) => Effect.Effect<number, ExchangeError>;
+		readonly listRates: () => Effect.Effect<ExchangeRateInfo[], DatabaseError>;
 	}
 >() {}
 
 export const makeExchangeService = (db: DrizzleD1Database) => {
 	const getRate = (from: string, to: string) =>
-		dbEffect(() =>
+		dbEffect("exchange.getRate", () =>
 			db
 				.select()
 				.from(exchangeRates)
@@ -54,7 +54,7 @@ export const makeExchangeService = (db: DrizzleD1Database) => {
 		);
 
 	const setRate = (from: string, to: string, rate: number) =>
-		dbEffect(() =>
+		dbEffect("exchange.setRate", () =>
 			db
 				.insert(exchangeRates)
 				.values({ fromCurrency: from, toCurrency: to, rate })
@@ -77,7 +77,7 @@ export const makeExchangeService = (db: DrizzleD1Database) => {
 	};
 
 	const listRates = () =>
-		dbEffect(() =>
+		dbEffect("exchange.listRates", () =>
 			db
 				.select({
 					from: exchangeRates.fromCurrency,

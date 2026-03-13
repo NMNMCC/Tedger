@@ -12,6 +12,8 @@ interface AddParams extends ParsedEntry {
 
 export const add = (p: AddParams) =>
 	Effect.gen(function* () {
+		yield* Effect.logInfo(`Adding entry for chat ${p.chatId}, user ${p.userId}`);
+		
 		const ledger = yield* LedgerService;
 		const exchange = yield* ExchangeService;
 		const baseCurrency = yield* ledger.getBaseCurrency(p.chatId);
@@ -33,6 +35,8 @@ export const add = (p: AddParams) =>
 			baseCurrency,
 		});
 
+		yield* Effect.logDebug(`Entry added: #${entry.id}`);
+		
 		const icon = entry.amount >= 0 ? "📈" : "📉";
 		let msg = `${icon} #${entry.id} ${fmt(entry.amount, entry.currency)}`;
 		if (entry.currency !== entry.baseCurrency) {
@@ -41,10 +45,4 @@ export const add = (p: AddParams) =>
 		msg += ` [${entry.category}]`;
 		if (entry.note) msg += ` ${entry.note}`;
 		return msg;
-	}).pipe(
-		Effect.catchTag("RateNotFoundError", (e) =>
-			Effect.succeed(
-				`❌ 未找到 ${e.from}/${e.to} 汇率\n请先设置: \`/rate ${e.from}/${e.to} <汇率>\``,
-			),
-		),
-	);
+	});
